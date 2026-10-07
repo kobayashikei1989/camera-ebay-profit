@@ -152,7 +152,7 @@ textarea.fallback { width: 100%; min-height: 160px; font-family: var(--font-num)
           <div class="field">
             <label for="tariffRate">関税率</label>
             <div class="inp"><input type="text" inputmode="decimal" id="tariffRate"><span class="unit">%</span></div>
-            <span class="hint">日本製品への米国の相互関税 15%（カメラ・レンズ）。販売価格（USD）に掛けます</span>
+            <span class="hint">日本原産品は通常関税と追加関税（Section 301）の合計で 12.5%（2026年7月24日〜）。カメラ・レンズはこれに当たります。販売価格（USD）に掛けます</span>
           </div>
           <div class="field">
             <label for="tariffFee">関税関連の手数料</label>
@@ -359,7 +359,7 @@ textarea.fallback { width: 100%; min-height: 160px; font-family: var(--font-num)
   const $ = id => document.getElementById(id);
   const NUM = ["tariffRate", "tariffFee", "price", "shipping", "salesTax", "customRate", "promoted", "perOrder", "fx", "payoneer", "cost", "shipCost", "jct"];
   const TXT = ["mTitle", "mSerial", "mCond", "mCheck", "mOptics", "mAcc", "mSupplier", "mUrl"];
-  const FACTORY = { store: "basic", trs: "no", tariffRate: "15", tariffFee: "1000", promoted: "0", intlFee: "1.35", fx: "150", payoneer: "2", jct: "10", perOrder: "", shipping: "0", salesTax: "0", category: "film_camera" };
+  const FACTORY = { store: "basic", trs: "no", tariffRate: "12.5", tariffFee: "1000", promoted: "0", intlFee: "1.35", fx: "150", payoneer: "2", jct: "10", perOrder: "", shipping: "0", salesTax: "0", category: "film_camera" };
   const DEFAULT_KEYS = ["store", "trs", "tariffRate", "tariffFee", "promoted", "intlFee", "fx", "payoneer", "jct"];
   const SAMPLE = { price: "380", shipping: "0", salesTax: "30.4", category: "film_camera", cost: "30000", shipCost: "4500" };
   const state = { store: "basic", trs: "no" };
