@@ -1,0 +1,622 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="eBayで売れたカメラ・レンズの注文から、手数料・為替・送料・DDP関税・消費税還付を差し引いて実際の利益と仕入れ上限を出す計算ツール。">
+<title>カメラ eBay利益計算</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: 入力フォーム（左）と、eBayの Fee details を模した明細レシート（右・追従）の2カラム。狭い画面では縦積み。 */
+:root {
+  --bg: #eef1f4;
+  --surface: #ffffff;
+  --sunken: #f5f7f9;
+  --ink: #18222d;
+  --muted: #5d6b79;
+  --line: #d6dde4;
+  --accent: #1f5fa8;
+  --accent-soft: #e3edf8;
+  --good: #14804a;
+  --good-soft: #e2f4ea;
+  --bad: #c0362c;
+  --bad-soft: #fbe7e5;
+  --warn: #9a6400;
+  --warn-soft: #fbf0d9;
+  --seg-fee: #c0362c;
+  --seg-ad: #e07a3a;
+  --seg-fx: #b58b1d;
+  --seg-ship: #6b7c8f;
+  --seg-tariff: #8e4fb0;
+  --seg-cost: #1f5fa8;
+  --seg-profit: #14804a;
+  --font-body: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
+  --font-num: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11161c; --surface: #19212a; --sunken: #141b22; --ink: #e6edf3; --muted: #93a2b1; --line: #2c3845;
+    --accent: #6ea8ec; --accent-soft: #1c2d42; --good: #4cc98a; --good-soft: #15301f; --bad: #f07a70; --bad-soft: #3a1c1a;
+    --warn: #e5b45a; --warn-soft: #3a2c12;
+    --seg-fee: #e0655b; --seg-ad: #ee9a5f; --seg-fx: #d4b04a; --seg-ship: #8796a8; --seg-tariff: #b583d4; --seg-cost: #5f9be3; --seg-profit: #4cc98a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11161c; --surface: #19212a; --sunken: #141b22; --ink: #e6edf3; --muted: #93a2b1; --line: #2c3845;
+  --accent: #6ea8ec; --accent-soft: #1c2d42; --good: #4cc98a; --good-soft: #15301f; --bad: #f07a70; --bad-soft: #3a1c1a;
+  --warn: #e5b45a; --warn-soft: #3a2c12;
+  --seg-fee: #e0655b; --seg-ad: #ee9a5f; --seg-fx: #d4b04a; --seg-ship: #8796a8; --seg-tariff: #b583d4; --seg-cost: #5f9be3; --seg-profit: #4cc98a;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.6; padding: 24px 16px 48px; }
+.wrap { max-width: 1120px; margin: 0 auto; display: grid; gap: 20px; }
+header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 8px 24px; }
+h1 { margin: 0; font-size: 1.6rem; font-weight: 900; letter-spacing: .01em; text-wrap: balance; }
+header p { margin: 0; color: var(--muted); font-size: .9rem; }
+.grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 440px); gap: 20px; align-items: start; }
+@media (max-width: 880px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* form */
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 20px; display: grid; gap: 18px; min-width: 0; }
+.group { display: grid; gap: 14px; }
+.group + .group { border-top: 1px solid var(--line); padding-top: 18px; }
+.group h2 { margin: 0; font-size: .78rem; font-weight: 700; letter-spacing: .12em; color: var(--muted); }
+.fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px 16px; }
+.field { display: grid; gap: 4px; min-width: 0; align-content: start; }
+.field label, .field .lbl { font-weight: 700; font-size: .88rem; display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+.req { font-size: .7rem; font-weight: 700; color: var(--bad); background: var(--bad-soft); padding: 0 6px; border-radius: 4px; }
+.hint { font-size: .78rem; color: var(--muted); line-height: 1.5; }
+.inp { position: relative; display: flex; align-items: center; }
+.inp .unit { position: absolute; right: 10px; color: var(--muted); font-size: .8rem; pointer-events: none; font-family: var(--font-num); }
+input[type="text"], select {
+  width: 100%; font: inherit; color: var(--ink); background: var(--sunken); border: 1px solid var(--line);
+  border-radius: 7px; padding: 8px 10px; min-height: 40px;
+}
+.inp input { padding-right: 44px; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+.seg { display: inline-flex; background: var(--sunken); border: 1px solid var(--line); border-radius: 8px; padding: 3px; gap: 3px; flex-wrap: wrap; }
+.seg button { font: inherit; font-size: .88rem; font-weight: 700; border: 0; background: transparent; color: var(--muted); padding: 6px 14px; border-radius: 6px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--accent); box-shadow: 0 1px 2px rgb(0 0 0 / .12); }
+.notice { font-size: .8rem; background: var(--warn-soft); color: var(--warn); padding: 8px 12px; border-radius: 7px; line-height: 1.55; }
+.ratechip { font-family: var(--font-num); font-size: .8rem; background: var(--accent-soft); color: var(--accent); padding: 6px 10px; border-radius: 6px; line-height: 1.5; }
+.btnrow { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn { font: inherit; font-size: .85rem; font-weight: 700; padding: 8px 14px; border-radius: 7px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.btn:hover { border-color: var(--accent); }
+.check { display: flex; gap: 8px; align-items: center; font-size: .85rem; color: var(--muted); cursor: pointer; }
+.check input { width: 16px; height: 16px; accent-color: var(--accent); }
+details summary { cursor: pointer; font-weight: 700; font-size: .88rem; color: var(--accent); }
+details[open] summary { margin-bottom: 12px; }
+
+/* result */
+.result { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 16px); display: grid; gap: 14px; min-width: 0; }
+@media (max-width: 880px) { .result { position: static; } }
+.hero { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 18px 20px; display: grid; gap: 12px; }
+.hero-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.hero-top .t { font-size: .78rem; font-weight: 700; letter-spacing: .12em; color: var(--muted); }
+.pill { font-size: .75rem; font-weight: 700; padding: 2px 10px; border-radius: 999px; }
+.pill.good { background: var(--good-soft); color: var(--good); }
+.pill.bad { background: var(--bad-soft); color: var(--bad); }
+.pill.warn { background: var(--warn-soft); color: var(--warn); }
+.kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.kpi { display: grid; gap: 2px; min-width: 0; }
+.kpi .k { font-size: .78rem; color: var(--muted); font-weight: 500; }
+.kpi .v { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 1.6rem; font-weight: 600; line-height: 1.2; overflow-wrap: anywhere; }
+.kpi .s { font-family: var(--font-num); font-size: .82rem; color: var(--muted); }
+.v.pos { color: var(--good); } .v.neg { color: var(--bad); }
+.bar { display: flex; height: 14px; border-radius: 4px; overflow: hidden; background: var(--sunken); }
+.bar span { display: block; height: 100%; min-width: 0; transition: width .25s ease; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .74rem; color: var(--muted); }
+.legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+
+.receipt { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 6px 0 10px; font-variant-numeric: tabular-nums; }
+.receipt h3 { margin: 0; padding: 12px 20px 6px; font-size: .78rem; letter-spacing: .12em; color: var(--muted); font-weight: 700; }
+.row { display: flex; justify-content: space-between; gap: 12px; padding: 4px 20px; font-size: .86rem; }
+.row .n { min-width: 0; }
+.row .n small { display: block; color: var(--muted); font-size: .74rem; font-family: var(--font-num); }
+.row .a { font-family: var(--font-num); white-space: nowrap; text-align: right; }
+.row.sub { color: var(--muted); font-size: .8rem; padding-left: 32px; }
+.row.total { font-weight: 700; border-top: 1px dashed var(--line); margin-top: 4px; padding-top: 8px; }
+.row.strong { font-weight: 700; font-size: .95rem; }
+.row .a.neg { color: var(--bad); } .row .a.pos { color: var(--good); }
+.sep { border-top: 1px solid var(--line); margin: 10px 0 4px; }
+.empty { padding: 28px 20px; text-align: center; color: var(--muted); font-size: .9rem; }
+.foot { font-size: .76rem; color: var(--muted); line-height: 1.6; }
+.toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + 20px); transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 8px 16px; border-radius: 8px; font-size: .85rem; font-weight: 700; }
+textarea.fallback { width: 100%; min-height: 160px; font-family: var(--font-num); font-size: .78rem; background: var(--sunken); color: var(--ink); border: 1px solid var(--line); border-radius: 7px; padding: 8px; }
+@media (prefers-reduced-motion: reduce) { .bar span { transition: none; } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>カメラ eBay利益計算</h1>
+      <p>eBayで売れたカメラ・レンズの注文から、手数料・広告費・為替・国際送料・関税（DDP）・消費税還付を差し引いて、手元に残る利益を出します。</p>
+    </div>
+    <p id="sampleNote">入力欄には例（フィルムカメラ本体 $380 の注文）が入っています。自分の注文の数字に書き換えてください。</p>
+  </header>
+
+  <div class="grid">
+    <form class="panel" id="form" autocomplete="off">
+      <section class="group">
+        <h2>関税（DDP・セラー負担）</h2>
+        <div class="fields" id="dutyFields">
+          <div class="field">
+            <label for="tariffRate">関税率</label>
+            <div class="inp"><input type="text" inputmode="decimal" id="tariffRate"><span class="unit">%</span></div>
+            <span class="hint">日本製品への米国の相互関税 15%（カメラ・レンズ）。販売価格（USD）に掛けます</span>
+          </div>
+          <div class="field">
+            <label for="tariffFee">関税関連の手数料</label>
+            <div class="inp"><input type="text" inputmode="decimal" id="tariffFee"><span class="unit">円</span></div>
+            <span class="hint">FedEx・DHLなどの関税立替手数料</span>
+          </div>
+        </div>
+        <label class="check"><input type="checkbox" id="noDuty"> 関税なしで計算する（米国以外への発送など）</label>
+      </section>
+
+      <section class="group">
+        <h2>売れた金額</h2>
+        <div class="fields">
+          <div class="field">
+            <label for="price">販売価格 <span class="req">必須</span></label>
+            <div class="inp"><input type="text" inputmode="decimal" id="price"><span class="unit">USD</span></div>
+          </div>
+          <div class="field">
+            <label for="shipping">バイヤー支払い送料</label>
+            <div class="inp"><input type="text" inputmode="decimal" id="shipping"><span class="unit">USD</span></div>
+            <span class="hint">送料無料なら 0</span>
+          </div>
+          <div class="field">
+            <label for="salesTax">Sales tax</label>
+            <div class="inp"><input type="text" inputmode="decimal" id="salesTax"><span class="unit">USD</span></div>
+            <span class="hint">バイヤーが払った米国の売上税。手数料の計算対象に入ります</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="group">
+        <h2>eBay手数料</h2>
+        <div class="fields">
+          <div class="field">
+            <span class="lbl">ストア契約</span>
+            <div class="seg" role="group" aria-label="ストア契約">
+              <button type="button" id="storeNone" data-store="none">なし</button>
+              <button type="button" id="storeBasic" data-store="basic">ベーシック以上</button>
+            </div>
+          </div>
+          <div class="field">
+            <span class="lbl">Top Rated Plus</span>
+            <div class="seg" role="group" aria-label="Top Rated Plus">
+              <button type="button" id="trsNo" data-trs="no">対象外</button>
+              <button type="button" id="trsYes" data-trs="yes">対象（FVF 10%引き）</button>
+            </div>
+          </div>
+        </div>
+        <div class="fields">
+          <div class="field">
+            <label for="category">カテゴリー <span class="req">必須</span></label>
+            <select id="category"></select>
+          </div>
+          <div class="field" id="customWrap" hidden>
+            <label for="customRate">販売手数料率（手入力）</label>
+            <div class="inp"><input type="text" inputmode="decimal" id="customRate"><span class="unit">%</span></div>
+          </div>
+        </div>
+        <div class="ratechip" id="rateChip">カテゴリーを選ぶと料率が出ます</div>
+        <div class="fields">
+          <div class="field">
+            <label for="promoted">Promoted Listings General</label>
+            <div class="inp"><input type="text" inputmode="decimal" id="promoted"><span class="unit">%</span></div>
+            <span class="hint">広告経由で売れたときだけ入力</span>
+          </div>
+          <div class="field">
+            <label for="intlFee">International fee</label>
+            <select id="intlFee">
+              <option value="1.35">1.35%（前々月売上 $3,000 未満）</option>
+              <option value="1.2">1.2%（$3,000〜$9,999.99）</option>
+              <option value="0.95">0.95%（$10,000〜$49,999.99）</option>
+              <option value="0.7">0.7%（$50,000〜$99,999.99）</option>
+              <option value="0.4">0.4%（$100,000 以上）</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="perOrder">1注文あたり固定費</label>
+            <div class="inp"><input type="text" inputmode="decimal" id="perOrder" placeholder="自動"><span class="unit">USD</span></div>
+            <span class="hint" id="perOrderHint">空欄なら自動（合計 $10 以下は $0.30、それ以外は $0.40）</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="group">
+        <h2>円に換えてからの費用</h2>
+        <div class="fields">
+          <div class="field">
+            <label for="fx">ドル円レート</label>
+            <div class="inp"><input type="text" inputmode="decimal" id="fx"><span class="unit">円</span></div>
+            <span class="hint">出金時のレートを入れると精度が上がります</span>
+          </div>
+          <div class="field">
+            <label for="payoneer">Payoneer 為替手数料</label>
+            <div class="inp"><input type="text" inputmode="decimal" id="payoneer"><span class="unit">%</span></div>
+          </div>
+          <div class="field">
+            <label for="cost">仕入れ値（税込）</label>
+            <div class="inp"><input type="text" inputmode="decimal" id="cost"><span class="unit">円</span></div>
+            <span class="hint">国内送料・梱包材も含めて</span>
+          </div>
+          <div class="field">
+            <label for="shipCost">国際送料（実費）</label>
+            <div class="inp"><input type="text" inputmode="decimal" id="shipCost"><span class="unit">円</span></div>
+            <span class="hint">日本郵便・FedEx・DHL等に払う額</span>
+          </div>
+          <div class="field">
+            <label for="jct">消費税率</label>
+            <div class="inp"><input type="text" inputmode="decimal" id="jct"><span class="unit">%</span></div>
+            <span class="hint">還付額の計算に使います</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="group">
+        <details>
+          <summary>商品メモ（任意・コピー結果に入ります）</summary>
+          <div class="fields">
+            <div class="field"><label for="mTitle">機種名</label><input type="text" id="mTitle" placeholder="例: Nikon F3 HP + Ai-s 50mm f1.4"></div>
+            <div class="field"><label for="mSerial">シリアル番号</label><input type="text" id="mSerial"></div>
+            <div class="field">
+              <label for="mCond">コンディション</label>
+              <select id="mCond">
+                <option value="">選ばない</option>
+                <option>MINT</option>
+                <option>Near MINT</option>
+                <option>Exc+5</option>
+                <option>Exc+4</option>
+                <option>Exc+3</option>
+                <option>Exc+2</option>
+                <option>Exc</option>
+                <option>For Parts / Not Working</option>
+              </select>
+            </div>
+            <div class="field"><label for="mCheck">動作確認</label><input type="text" id="mCheck" placeholder="例: シャッター全速OK・露出計OK"></div>
+            <div class="field"><label for="mOptics">光学状態</label><input type="text" id="mOptics" placeholder="例: カビ・クモリなし／チリ少々"></div>
+            <div class="field"><label for="mAcc">付属品</label><input type="text" id="mAcc" placeholder="例: キャップ・ストラップ・元箱"></div>
+            <div class="field"><label for="mSupplier">仕入先</label><input type="text" id="mSupplier"></div>
+            <div class="field"><label for="mUrl">eBay URL</label><input type="text" id="mUrl"></div>
+          </div>
+        </details>
+        <div class="btnrow">
+          <button type="button" class="btn" id="saveDefaults">今の設定を既定値として保存</button>
+          <button type="button" class="btn" id="resetItem">商品の入力をクリア</button>
+          <button type="button" class="btn" id="resetAll">すべて初期値に戻す</button>
+        </div>
+        <span class="hint">既定値として保存されるのは、ストア・TRS・広告率・International fee・為替・Payoneer・消費税率・関税設定です（このブラウザにだけ保存）。</span>
+      </section>
+    </form>
+
+    <aside class="result" aria-live="polite">
+      <div class="hero" id="hero"></div>
+      <div class="receipt" id="receipt"></div>
+      <div class="btnrow">
+        <button type="button" class="btn primary" id="copyAll">結果をコピー</button>
+        <button type="button" class="btn" id="copyShort">簡易コピー</button>
+      </div>
+      <textarea class="fallback" id="copyFallback" hidden readonly aria-label="コピー用テキスト"></textarea>
+      <p class="foot">表示は目安です。最終的な金額は Seller Hub の Fee details、配送会社の請求、税関の判断が優先されます。手数料率は2026年9月時点の eBay 公表値をもとにしています。消費税の還付は、課税事業者で還付申告をしている場合のみ戻ります。</p>
+    </aside>
+  </div>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+(() => {
+  // ---- 手数料表 ----
+  // m: 段階式（各区間の超過分にその率）。w: 総額で率が決まり全額に掛かる。f: 一律
+  const M = (...t) => ({ type: "m", tiers: t });          // [上限, 率] の並び。上限 Infinity が最後
+  const W = (th, lo, hi) => ({ type: "w", th, lo, hi });
+  const F = (r) => ({ type: "f", rate: r });
+  const std = (r, cap) => M([cap, r], [Infinity, 2.35]);
+  // カメラ本体・レンズはストア契約で 9.35%、周辺機器・アクセサリーは 12.7%
+  const CATS = [
+    ["film_camera", "フィルムカメラ本体", std(13.6, 7500), std(9.35, 2500)],
+    ["digital_camera", "デジタルカメラ本体", std(13.6, 7500), std(9.35, 2500)],
+    ["lens", "レンズ", std(13.6, 7500), std(9.35, 2500)],
+    ["camera_kit", "ボディ＋レンズのセット", std(13.6, 7500), std(9.35, 2500)],
+    ["camera_acc", "周辺機器・パーツ（ファインダー・フラッシュ・グリップ等）", std(13.6, 7500), std(12.7, 2500)],
+    ["camera_misc", "三脚・フィルター・ストラップ・ケース", std(13.6, 7500), std(12.7, 2500)],
+  ];
+  const catMap = Object.fromEntries(CATS.map(c => [c[0], { name: c[1], none: c[2], basic: c[3] }]));
+
+  const usd = n => (n < 0 ? "−" : "") + "$" + Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const yen = n => (n < 0 ? "−" : "") + "¥" + Math.round(Math.abs(n)).toLocaleString("ja-JP");
+  const pct = n => (Math.round(n * 100) / 100).toLocaleString("ja-JP", { maximumFractionDigits: 2 }) + "%";
+  const money = n => Math.round(n * 100) / 100;
+
+  function fvf(sched, base) {
+    if (sched.type === "f") return { fee: base * sched.rate / 100, desc: `${sched.rate}%（一律）` };
+    if (sched.type === "w") {
+      const r = base <= sched.th ? sched.lo : sched.hi;
+      return { fee: base * r / 100, desc: `総額 $${sched.th.toLocaleString()} 以下は ${sched.lo}%、超えると全額に ${sched.hi}%` };
+    }
+    let fee = 0, prev = 0; const parts = [];
+    for (const [cap, r] of sched.tiers) {
+      if (base > prev) fee += (Math.min(base, cap) - prev) * r / 100;
+      parts.push(cap === Infinity ? `${r}%（超過分）` : `${r}%（$${cap.toLocaleString()} まで）`);
+      prev = cap;
+    }
+    return { fee, desc: parts.join(" → ") };
+  }
+
+  // ---- 状態 ----
+  const $ = id => document.getElementById(id);
+  const NUM = ["tariffRate", "tariffFee", "price", "shipping", "salesTax", "customRate", "promoted", "perOrder", "fx", "payoneer", "cost", "shipCost", "jct"];
+  const TXT = ["mTitle", "mSerial", "mCond", "mCheck", "mOptics", "mAcc", "mSupplier", "mUrl"];
+  const FACTORY = { store: "basic", trs: "no", tariffRate: "15", tariffFee: "1000", promoted: "0", intlFee: "1.35", fx: "150", payoneer: "2", jct: "10", perOrder: "", shipping: "0", salesTax: "0", category: "film_camera" };
+  const DEFAULT_KEYS = ["store", "trs", "tariffRate", "tariffFee", "promoted", "intlFee", "fx", "payoneer", "jct"];
+  const SAMPLE = { price: "380", shipping: "0", salesTax: "30.4", category: "film_camera", cost: "30000", shipCost: "4500" };
+  const state = { store: "basic", trs: "no" };
+  const STORE_KEY = "cameraEbayProfitDefaults";
+
+  function loadSaved() { try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch { return null; } }
+
+  // カテゴリー select
+  const sel = $("category");
+  sel.innerHTML = `<option value="">選んでください</option>` + CATS.map(c => `<option value="${c[0]}">${c[1]}</option>`).join("") + `<option value="custom">手数料率を手入力する</option>`;
+
+  function applyValues(v) {
+    for (const k of Object.keys(v)) {
+      if (k === "store" || k === "trs") state[k] = v[k];
+      else if ($(k)) $(k).value = v[k];
+    }
+  }
+  function syncSegs() {
+    document.querySelectorAll("[data-store]").forEach(b => b.setAttribute("aria-pressed", b.dataset.store === state.store));
+    document.querySelectorAll("[data-trs]").forEach(b => b.setAttribute("aria-pressed", b.dataset.trs === state.trs));
+    $("dutyFields").hidden = $("noDuty").checked;
+    $("customWrap").hidden = sel.value !== "custom";
+  }
+
+  const n = id => { const x = parseFloat(String($(id).value).replace(/[,，\s円$%]/g, "")); return isFinite(x) ? x : 0; };
+  const has = id => String($(id).value).trim() !== "";
+
+  // ---- 計算 ----
+  function compute() {
+    const price = n("price"), ship = n("shipping"), stax = n("salesTax");
+    const cat = sel.value;
+    const base = price + ship + stax; // 手数料対象額
+    let sched = null, rateDesc = "";
+    if (cat === "custom") { sched = F(n("customRate")); rateDesc = `${n("customRate")}%（手入力）`; }
+    else if (cat) { sched = catMap[cat][state.store]; }
+    if (sched && cat !== "custom") rateDesc = fvf(sched, base).desc;
+    $("rateChip").textContent = sched ? `販売手数料率：${rateDesc}` : "カテゴリーを選ぶと料率が出ます";
+
+    const autoPer = base <= 10 ? 0.30 : 0.40;
+    $("perOrderHint").textContent = `空欄なら自動：この注文は $${autoPer.toFixed(2)}（合計 $10 以下は $0.30、それ以外は $0.40）`;
+    if (!(price > 0) || !sched) return { ready: false, price, sched };
+
+    const fvfRaw = money(fvf(sched, base).fee);
+    const trsDisc = state.trs === "yes" ? money(fvfRaw * 0.1) : 0;
+    const fvfNet = money(fvfRaw - trsDisc);
+    const intlRate = parseFloat($("intlFee").value);
+    const intl = money(base * intlRate / 100);
+    const itemFees = money(fvfNet + intl);
+    const perOrder = has("perOrder") ? n("perOrder") : autoPer;
+    const totalFees = money(itemFees + perOrder);
+    const jct = n("jct") / 100;
+    const feeTax = money(totalFees * jct);
+    const feesInclTax = money(totalFees + feeTax);
+    const adRate = n("promoted");
+    const ad = money(base * adRate / 100);
+    const adTax = money(ad * jct);
+    const adInclTax = money(ad + adTax);
+
+    const sales = price + ship;               // セラーの売上（Sales taxはeBayが納付）
+    const payout = money(sales - feesInclTax - adInclTax);
+    const fx = n("fx");
+    const payoneer = n("payoneer") / 100;
+    const grossJpy = payout * fx;
+    const fxFee = grossJpy * payoneer;
+    const jpy = grossJpy - fxFee;
+    const shipCost = n("shipCost");
+    const ddp = !$("noDuty").checked;
+    const tariffDuty = ddp ? price * n("tariffRate") / 100 * fx : 0;
+    const tariffFee = ddp ? n("tariffFee") : 0;
+    const tariff = tariffDuty + tariffFee;
+    const cost = n("cost");
+    const hasCost = has("cost");
+
+    const beforeCost = jpy - shipCost - tariff;   // ここから仕入れ値を引く
+    const profit = beforeCost - cost;
+    const salesJpy = sales * fx;
+    const margin = salesJpy > 0 ? profit / salesJpy * 100 : 0;
+    const feeTaxJpy = (feeTax + adTax) * fx;
+    const costTax = cost * jct / (1 + jct);
+    const profitR = profit + feeTaxJpy + costTax;
+    const marginR = salesJpy > 0 ? profitR / salesJpy * 100 : 0;
+    const capNo = beforeCost;
+    const capR = (beforeCost + feeTaxJpy) * (1 + jct);
+
+    return { ready: true, price, ship, stax, base, fvfRaw, trsDisc, fvfNet, intlRate, intl, itemFees, perOrder, totalFees, feeTax, feesInclTax,
+      adRate, ad, adTax, adInclTax, sales, payout, fx, payoneer, grossJpy, fxFee, jpy, shipCost, ddp, tariffDuty, tariffFee, tariff,
+      cost, hasCost, profit, margin, feeTaxJpy, costTax, profitR, marginR, capNo, capR, salesJpy, rateDesc, cat };
+  }
+
+  function row(name, amt, cls = "", note = "", amtCls = "") {
+    return `<div class="row ${cls}"><span class="n">${name}${note ? `<small>${note}</small>` : ""}</span><span class="a ${amtCls}">${amt}</span></div>`;
+  }
+
+  let last = null;
+  function render() {
+    syncSegs();
+    const r = compute();
+    last = r;
+    const hero = $("hero"), rc = $("receipt");
+    if (!r.ready) {
+      const msgs = [];
+      if (!(r.price > 0)) msgs.push("販売価格を入れてください。");
+      if (!r.sched) msgs.push("カテゴリーを選んでください。");
+      hero.innerHTML = `<div class="hero-top"><span class="t">利益</span><span class="pill warn">入力待ち</span></div><div class="empty">${msgs.join("<br>")}</div>`;
+      rc.innerHTML = "";
+      return;
+    }
+    // ヒーロー
+    let pill;
+    if (!r.hasCost) pill = `<span class="pill warn">仕入れ値未入力</span>`;
+    else if (r.profit < 0) pill = `<span class="pill bad">赤字</span>`;
+    else if (r.margin < 10) pill = `<span class="pill warn">薄利（${pct(r.margin)}）</span>`;
+    else pill = `<span class="pill good">黒字</span>`;
+
+    const kpiMain = r.hasCost
+      ? `<div class="kpi"><span class="k">利益（還付なし）</span><span class="v ${r.profit < 0 ? "neg" : "pos"}">${yen(r.profit)}</span><span class="s">利益率 ${pct(r.margin)}</span></div>
+         <div class="kpi"><span class="k">利益（消費税還付込み）</span><span class="v ${r.profitR < 0 ? "neg" : "pos"}">${yen(r.profitR)}</span><span class="s">利益率 ${pct(r.marginR)}</span></div>`
+      : `<div class="kpi"><span class="k">仕入れ上限（還付なし）</span><span class="v">${yen(r.capNo)}</span><span class="s">これ以下で仕入れれば黒字</span></div>
+         <div class="kpi"><span class="k">仕入れ上限（還付込み）</span><span class="v">${yen(r.capR)}</span><span class="s">消費税還付を見込んだ場合</span></div>`;
+
+    // 売上の行き先バー（円換算、売上 = 100%）
+    const segs = [
+      ["eBay手数料", (r.feesInclTax) * r.fx, "--seg-fee"],
+      ["広告費", r.adInclTax * r.fx, "--seg-ad"],
+      ["為替手数料", r.fxFee, "--seg-fx"],
+      ["国際送料", r.shipCost, "--seg-ship"],
+      ["関税", r.tariff, "--seg-tariff"],
+      ["仕入れ", r.cost, "--seg-cost"],
+      ["利益", Math.max(0, r.profit), "--seg-profit"],
+    ].filter(s => s[1] > 0.5);
+    const tot = Math.max(r.salesJpy, segs.reduce((a, s) => a + s[1], 0));
+    const bar = `<div class="bar" role="img" aria-label="売上の内訳">${segs.map(s => `<span style="width:${(s[1] / tot * 100).toFixed(2)}%;background:var(${s[2]})" title="${s[0]} ${yen(s[1])}"></span>`).join("")}</div>
+      <div class="legend">${segs.map(s => `<span><i style="background:var(${s[2]})"></i>${s[0]} ${pct(s[1] / r.salesJpy * 100)}</span>`).join("")}</div>`;
+
+    hero.innerHTML = `<div class="hero-top"><span class="t">この注文の利益</span>${pill}</div><div class="kpis">${kpiMain}</div>${bar}`;
+
+    // 明細
+    let h = `<h3>手数料明細（USD）</h3>`;
+    h += row("Item price", usd(r.price));
+    h += row("Shipping and handling", usd(r.ship));
+    h += row("Sales tax", usd(r.stax));
+    h += row("Fees based on", usd(r.base), "total");
+    h += row(r.trsDisc ? "Final value fee（TRS Plus 割引後）" : "Final value fee", usd(-r.fvfNet), "", r.cat === "custom" ? `${n("customRate")}%` : r.rateDesc, "neg");
+    if (r.trsDisc) { h += row("割引前", usd(-r.fvfRaw), "sub"); h += row("Top Rated Plus 10%引き", "+" + usd(r.trsDisc), "sub"); }
+    h += row("International fee", usd(-r.intl), "", `${r.intlRate}%`, "neg");
+    h += row("Per order fixed amount", usd(-r.perOrder), "", "", "neg");
+    h += row("Total fees", usd(-r.totalFees), "total", "", "neg");
+    h += row("Tax（手数料の消費税）", usd(-r.feeTax), "", `${n("jct")}%`, "neg");
+    h += row("Total fees（税込）", usd(-r.feesInclTax), "strong", "", "neg");
+    if (r.ad > 0) {
+      h += row("Promoted Listings General", usd(-r.ad), "", `広告率 ${r.adRate}%`, "neg");
+      h += row("Tax（広告費の消費税）", usd(-r.adTax), "", "", "neg");
+      h += row("Total ad fee（税込）", usd(-r.adInclTax), "strong", "", "neg");
+    }
+    h += `<div class="sep"></div><h3>入金と利益（円）</h3>`;
+    h += row("売上（商品＋送料）", usd(r.sales));
+    h += row("Payout", usd(r.payout), "strong", "売上 − 手数料 − 広告費");
+    h += row("円換算", yen(r.grossJpy), "", `1 USD ＝ ${r.fx} 円`);
+    h += row("Payoneer 為替手数料", yen(-r.fxFee), "", `${pct(r.payoneer * 100)}`, "neg");
+    h += row("受取額", yen(r.jpy), "total");
+    h += row("国際送料", yen(-r.shipCost), "", "", "neg");
+    if (r.ddp) {
+      h += row("関税", yen(-r.tariffDuty), "", `${usd(r.price)} × ${n("tariffRate")}%`, "neg");
+      h += row("関税関連の手数料", yen(-r.tariffFee), "", "", "neg");
+    }
+    h += row("仕入れ上限（還付なし）", yen(r.capNo), "total");
+    h += row("仕入れ上限（還付込み）", yen(r.capR), "");
+    if (r.hasCost) {
+      h += row("仕入れ値（税込）", yen(-r.cost), "", "", "neg");
+      h += row("利益（還付なし）", yen(r.profit), "strong total", `利益率 ${pct(r.margin)}`, r.profit < 0 ? "neg" : "pos");
+      h += row("還付：手数料・広告費の消費税", "+" + yen(r.feeTaxJpy), "sub");
+      h += row("還付：仕入れの消費税", "+" + yen(r.costTax), "sub");
+      h += row("利益（還付込み）", yen(r.profitR), "strong", `利益率 ${pct(r.marginR)}`, r.profitR < 0 ? "neg" : "pos");
+    } else {
+      h += `<div class="empty">仕入れ値を入れると、利益と利益率が出ます。</div>`;
+    }
+    rc.innerHTML = h;
+  }
+
+  // ---- コピー ----
+  function memoLines() {
+    const m = [["機種", "mTitle"], ["シリアル", "mSerial"], ["コンディション", "mCond"], ["動作", "mCheck"], ["光学", "mOptics"], ["付属品", "mAcc"], ["仕入先", "mSupplier"], ["eBay URL", "mUrl"]]
+      .filter(([, id]) => has(id)).map(([k, id]) => `${k}: ${$(id).value.trim()}`);
+    return m.length ? m.join("\n") + "\n" : "";
+  }
+  function fullText(r) {
+    const catName = r.cat === "custom" ? `手入力 ${n("customRate")}%` : catMap[r.cat].name;
+    return memoLines() + [
+      `カテゴリー: ${catName}（${state.store === "basic" ? "ストアあり" : "ストアなし"}${state.trs === "yes" ? "・TRS Plus" : ""}）`,
+      `関税: ${r.ddp ? `DDP ${n("tariffRate")}%` : "なし"}`,
+      `販売価格: ${usd(r.price)} / 送料: ${usd(r.ship)} / Sales tax: ${usd(r.stax)}`,
+      `Final value fee: ${usd(r.fvfNet)}`,
+      `International fee: ${usd(r.intl)}`,
+      `Per order: ${usd(r.perOrder)}`,
+      `手数料合計（税込）: ${usd(r.feesInclTax)}`,
+      r.ad > 0 ? `広告費（税込）: ${usd(r.adInclTax)}` : null,
+      `Payout: ${usd(r.payout)}`,
+      `為替: ${r.fx}円 / 受取額: ${yen(r.jpy)}`,
+      `国際送料: ${yen(r.shipCost)}`,
+      r.ddp ? `関税合計: ${yen(r.tariff)}` : null,
+      `仕入れ上限（還付なし）: ${yen(r.capNo)}`,
+      `仕入れ上限（還付込み）: ${yen(r.capR)}`,
+      r.hasCost ? `仕入れ値: ${yen(r.cost)}` : null,
+      r.hasCost ? `利益（還付なし）: ${yen(r.profit)}（${pct(r.margin)}）` : null,
+      r.hasCost ? `利益（還付込み）: ${yen(r.profitR)}（${pct(r.marginR)}）` : null,
+    ].filter(Boolean).join("\n");
+  }
+  function shortText(r) {
+    return memoLines() + (r.hasCost
+      ? `売値 ${usd(r.price)} → 利益 ${yen(r.profit)}（${pct(r.margin)}）／還付込み ${yen(r.profitR)}（${pct(r.marginR)}）`
+      : `売値 ${usd(r.price)} → 仕入れ上限 ${yen(r.capNo)}（還付込み ${yen(r.capR)}）`);
+  }
+  function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => t.hidden = true, 1800); }
+  function copy(text) {
+    const fb = $("copyFallback");
+    const fallback = () => { fb.hidden = false; fb.value = text; fb.focus(); fb.select(); toast("自動コピーできませんでした。選択済みのテキストをコピーしてください"); };
+    try {
+      navigator.clipboard.writeText(text).then(() => { fb.hidden = true; toast("コピーしました"); }, fallback);
+    } catch { fallback(); }
+  }
+  $("copyAll").addEventListener("click", () => { if (last?.ready) copy(fullText(last)); else toast("販売価格とカテゴリーを入れてください"); });
+  $("copyShort").addEventListener("click", () => { if (last?.ready) copy(shortText(last)); else toast("販売価格とカテゴリーを入れてください"); });
+
+  // ---- イベント ----
+  document.querySelectorAll("[data-store]").forEach(b => b.addEventListener("click", () => { state.store = b.dataset.store; render(); }));
+  document.querySelectorAll("[data-trs]").forEach(b => b.addEventListener("click", () => { state.trs = b.dataset.trs; render(); }));
+  $("form").addEventListener("input", render);
+  $("form").addEventListener("change", render);
+  $("form").addEventListener("submit", e => e.preventDefault());
+
+  $("saveDefaults").addEventListener("click", () => {
+    const v = {};
+    for (const k of DEFAULT_KEYS) v[k] = (k in state) ? state[k] : $(k).value;
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(v)); toast("既定値を保存しました"); }
+    catch { toast("このブラウザでは保存できませんでした"); }
+  });
+  $("resetItem").addEventListener("click", () => {
+    for (const id of ["price", "cost", "shipCost", "customRate", "perOrder", ...TXT]) $(id).value = "";
+    $("shipping").value = "0"; $("salesTax").value = "0";
+    $("sampleNote").hidden = true;
+    render(); $("price").focus();
+  });
+  $("resetAll").addEventListener("click", () => {
+    try { localStorage.removeItem(STORE_KEY); } catch {}
+    for (const id of [...NUM, ...TXT]) $(id).value = "";
+    $("noDuty").checked = false;
+    applyValues(FACTORY);
+    $("sampleNote").hidden = true;
+    render(); toast("初期値に戻しました");
+  });
+
+  // ---- 起動 ----
+  applyValues(FACTORY);
+  const saved = loadSaved();
+  if (saved) applyValues(saved);
+  applyValues(SAMPLE);
+  render();
+})();
+</script>
+</body>
+</html>
