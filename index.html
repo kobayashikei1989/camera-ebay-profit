@@ -91,6 +91,10 @@ input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px s
 .btn:hover { border-color: var(--accent); }
 .check { display: flex; gap: 8px; align-items: center; font-size: .85rem; color: var(--muted); cursor: pointer; }
 .check input { width: 16px; height: 16px; accent-color: var(--accent); }
+.fixed { font-family: var(--font-num); font-size: 1.15rem; font-weight: 600; min-height: 40px; display: flex; align-items: baseline; gap: 8px; padding-top: 6px; }
+.fixed small { font-family: var(--font-body); font-size: .72rem; font-weight: 700; color: var(--muted); background: var(--sunken); border: 1px solid var(--line); padding: 0 6px; border-radius: 4px; }
+.mini { font: inherit; font-size: .72rem; font-weight: 700; color: var(--accent); background: var(--accent-soft); border: 0; border-radius: 4px; padding: 1px 8px; cursor: pointer; }
+.mini:disabled { opacity: .5; cursor: default; }
 details summary { cursor: pointer; font-weight: 700; font-size: .88rem; color: var(--accent); }
 details[open] summary { margin-bottom: 12px; }
 
@@ -150,14 +154,18 @@ textarea.fallback { width: 100%; min-height: 160px; font-family: var(--font-num)
         <h2>関税（DDP・セラー負担）</h2>
         <div class="fields" id="dutyFields">
           <div class="field">
-            <label for="tariffRate">関税率</label>
-            <div class="inp"><input type="text" inputmode="decimal" id="tariffRate"><span class="unit">%</span></div>
-            <span class="hint">日本原産品は通常関税と追加関税（Section 301）の合計で 12.5%（2026年7月24日〜）。カメラ・レンズはこれに当たります。販売価格（USD）に掛けます</span>
+            <span class="lbl">関税率</span>
+            <div class="fixed">12.5%<small>固定</small></div>
+            <span class="hint">日本原産のカメラ・レンズは、通常関税と追加関税（Section 301）の合計で 12.5%（2026年7月24日〜）。販売価格（USD）に掛けます</span>
           </div>
           <div class="field">
-            <label for="tariffFee">関税関連の手数料</label>
+            <label for="carrier">発送方法</label>
+            <select id="carrier"></select>
+            <span class="hint" id="carrierHint"></span>
+          </div>
+          <div class="field" id="tariffFeeWrap" hidden>
+            <label for="tariffFee">関税関連の手数料（手入力）</label>
             <div class="inp"><input type="text" inputmode="decimal" id="tariffFee"><span class="unit">円</span></div>
-            <span class="hint">FedEx・DHLなどの関税立替手数料</span>
           </div>
         </div>
         <label class="check"><input type="checkbox" id="noDuty"> 関税なしで計算する（米国以外への発送など）</label>
@@ -240,9 +248,9 @@ textarea.fallback { width: 100%; min-height: 160px; font-family: var(--font-num)
         <h2>円に換えてからの費用</h2>
         <div class="fields">
           <div class="field">
-            <label for="fx">ドル円レート</label>
+            <label for="fx">ドル円レート <button type="button" class="mini" id="fxRefresh">最新に更新</button></label>
             <div class="inp"><input type="text" inputmode="decimal" id="fx"><span class="unit">円</span></div>
-            <span class="hint">出金時のレートを入れると精度が上がります</span>
+            <span class="hint" id="fxHint">最新レートを取得しています…</span>
           </div>
           <div class="field">
             <label for="payoneer">Payoneer 為替手数料</label>
@@ -298,7 +306,7 @@ textarea.fallback { width: 100%; min-height: 160px; font-family: var(--font-num)
           <button type="button" class="btn" id="resetItem">商品の入力をクリア</button>
           <button type="button" class="btn" id="resetAll">すべて初期値に戻す</button>
         </div>
-        <span class="hint">既定値として保存されるのは、ストア・TRS・広告率・International fee・為替・Payoneer・消費税率・関税設定です（このブラウザにだけ保存）。</span>
+        <span class="hint">既定値として保存されるのは、ストア・TRS・広告率・International fee・Payoneer・消費税率・発送方法です（このブラウザにだけ保存）。ドル円レートは開くたびに最新の値を取得します。</span>
       </section>
     </form>
 
@@ -355,12 +363,28 @@ textarea.fallback { width: 100%; min-height: 160px; font-family: var(--font-num)
     return { fee, desc: parts.join(" → ") };
   }
 
+  // ---- 関税 ----
+  const TARIFF_RATE = 12.5; // 日本原産カメラ・レンズ：MFN＋Section 301 で合計 12.5%（2026-07-24〜）
+  // 発送方法ごとの関税関連手数料。d = 関税額(USD), fx = ドル円。戻り値は [項目名, 円] の配列
+  const CARRIERS = [
+    ["speedpak_fedex", "SpeedPAK via FedEx（CPaSS）", "MPF $2.62 ＋ 関税処理 2.1% ＋ IP通関 296円",
+      (d, fx) => [["MPF（米国通関手数料）", 2.62 * fx], ["米国関税処理費用 2.1%", (d + 2.62) * 0.021 * fx], ["FedEx IP通関", 296]]],
+    ["speedpak_dhl", "SpeedPAK via DHL（CPaSS）", "Regulatory $1.31 ＋ 関税処理 2.1% ＋ Duty&Tax Paid 2%（最低850円）",
+      (d, fx) => [["Regulatory Charges", 1.31 * fx], ["米国関税処理費用 2.1%", (d + 1.31) * 0.021 * fx], ["Duty&Tax Paid 2%", Math.max(d * 0.02 * fx, 850)]]],
+    ["speedpak_eco", "SpeedPAK エコノミー（CPaSS）", "関税処理 2.1% ＋ 輸入通関 225円",
+      (d, fx) => [["米国関税処理手数料 2.1%", d * 0.021 * fx], ["米国輸入通関手数料", 225]]],
+    ["fedex_direct", "FedEx 直契約（目安）", "立替手数料 $15 か関税の2% の高い方 ＋ MPF $2.62。契約により異なります",
+      (d, fx) => [["MPF（米国通関手数料）", 2.62 * fx], ["立替手数料", Math.max(15, (d + 2.62) * 0.02) * fx]]],
+    ["manual", "手入力", "請求書の金額を入れてください", null],
+  ];
+  const carrierMap = Object.fromEntries(CARRIERS.map(c => [c[0], { name: c[1], desc: c[2], calc: c[3] }]));
+
   // ---- 状態 ----
   const $ = id => document.getElementById(id);
-  const NUM = ["tariffRate", "tariffFee", "price", "shipping", "salesTax", "customRate", "promoted", "perOrder", "fx", "payoneer", "cost", "shipCost", "jct"];
+  const NUM = ["tariffFee", "price", "shipping", "salesTax", "customRate", "promoted", "perOrder", "fx", "payoneer", "cost", "shipCost", "jct"];
   const TXT = ["mTitle", "mSerial", "mCond", "mCheck", "mOptics", "mAcc", "mSupplier", "mUrl"];
-  const FACTORY = { store: "basic", trs: "no", tariffRate: "12.5", tariffFee: "1000", promoted: "0", intlFee: "1.35", fx: "150", payoneer: "2", jct: "10", perOrder: "", shipping: "0", salesTax: "0", category: "film_camera" };
-  const DEFAULT_KEYS = ["store", "trs", "tariffRate", "tariffFee", "promoted", "intlFee", "fx", "payoneer", "jct"];
+  const FACTORY = { store: "basic", trs: "no", carrier: "speedpak_fedex", tariffFee: "1000", promoted: "0", intlFee: "1.35", fx: "150", payoneer: "2", jct: "10", perOrder: "", shipping: "0", salesTax: "0", category: "film_camera" };
+  const DEFAULT_KEYS = ["store", "trs", "carrier", "tariffFee", "promoted", "intlFee", "payoneer", "jct"];
   const SAMPLE = { price: "380", shipping: "0", salesTax: "30.4", category: "film_camera", cost: "30000", shipCost: "4500" };
   const state = { store: "basic", trs: "no" };
   const STORE_KEY = "cameraEbayProfitDefaults";
@@ -371,9 +395,12 @@ textarea.fallback { width: 100%; min-height: 160px; font-family: var(--font-num)
   const sel = $("category");
   sel.innerHTML = `<option value="">選んでください</option>` + CATS.map(c => `<option value="${c[0]}">${c[1]}</option>`).join("") + `<option value="custom">手数料率を手入力する</option>`;
 
-  function applyValues(v) {
+  $("carrier").innerHTML = CARRIERS.map(c => `<option value="${c[0]}">${c[1]}</option>`).join("");
+
+  function applyValues(v, opts = {}) {
     for (const k of Object.keys(v)) {
       if (k === "store" || k === "trs") state[k] = v[k];
+      else if (k === "tariffRate" || (k === "fx" && opts.skipFx)) continue; // 関税率は固定、為替は最新を取得
       else if ($(k)) $(k).value = v[k];
     }
   }
@@ -382,6 +409,9 @@ textarea.fallback { width: 100%; min-height: 160px; font-family: var(--font-num)
     document.querySelectorAll("[data-trs]").forEach(b => b.setAttribute("aria-pressed", b.dataset.trs === state.trs));
     $("dutyFields").hidden = $("noDuty").checked;
     $("customWrap").hidden = sel.value !== "custom";
+    const c = carrierMap[$("carrier").value] || carrierMap.speedpak_fedex;
+    $("tariffFeeWrap").hidden = !!c.calc;
+    $("carrierHint").textContent = c.desc;
   }
 
   const n = id => { const x = parseFloat(String($(id).value).replace(/[,，\s円$%]/g, "")); return isFinite(x) ? x : 0; };
@@ -427,8 +457,11 @@ textarea.fallback { width: 100%; min-height: 160px; font-family: var(--font-num)
     const jpy = grossJpy - fxFee;
     const shipCost = n("shipCost");
     const ddp = !$("noDuty").checked;
-    const tariffDuty = ddp ? price * n("tariffRate") / 100 * fx : 0;
-    const tariffFee = ddp ? n("tariffFee") : 0;
+    const dutyUsd = price * TARIFF_RATE / 100;
+    const tariffDuty = ddp ? dutyUsd * fx : 0;
+    const carrier = carrierMap[$("carrier").value] || carrierMap.speedpak_fedex;
+    const feeParts = !ddp ? [] : carrier.calc ? carrier.calc(dutyUsd, fx) : [["関税関連の手数料（手入力）", n("tariffFee")]];
+    const tariffFee = feeParts.reduce((a, p) => a + p[1], 0);
     const tariff = tariffDuty + tariffFee;
     const cost = n("cost");
     const hasCost = has("cost");
@@ -445,7 +478,7 @@ textarea.fallback { width: 100%; min-height: 160px; font-family: var(--font-num)
     const capR = (beforeCost + feeTaxJpy) * (1 + jct);
 
     return { ready: true, price, ship, stax, base, fvfRaw, trsDisc, fvfNet, intlRate, intl, itemFees, perOrder, totalFees, feeTax, feesInclTax,
-      adRate, ad, adTax, adInclTax, sales, payout, fx, payoneer, grossJpy, fxFee, jpy, shipCost, ddp, tariffDuty, tariffFee, tariff,
+      adRate, ad, adTax, adInclTax, sales, payout, fx, payoneer, grossJpy, fxFee, jpy, shipCost, ddp, tariffDuty, tariffFee, tariff, feeParts, carrierName: carrier.name,
       cost, hasCost, profit, margin, feeTaxJpy, costTax, profitR, marginR, capNo, capR, salesJpy, rateDesc, cat };
   }
 
@@ -522,8 +555,9 @@ textarea.fallback { width: 100%; min-height: 160px; font-family: var(--font-num)
     h += row("受取額", yen(r.jpy), "total");
     h += row("国際送料", yen(-r.shipCost), "", "", "neg");
     if (r.ddp) {
-      h += row("関税", yen(-r.tariffDuty), "", `${usd(r.price)} × ${n("tariffRate")}%`, "neg");
-      h += row("関税関連の手数料", yen(-r.tariffFee), "", "", "neg");
+      h += row("関税", yen(-r.tariffDuty), "", `${usd(r.price)} × ${TARIFF_RATE}%`, "neg");
+      h += row("関税関連の手数料", yen(-r.tariffFee), "", r.carrierName, "neg");
+      for (const [k, v] of r.feeParts) h += row(k, yen(-v), "sub");
     }
     h += row("仕入れ上限（還付なし）", yen(r.capNo), "total");
     h += row("仕入れ上限（還付込み）", yen(r.capR), "");
@@ -549,7 +583,7 @@ textarea.fallback { width: 100%; min-height: 160px; font-family: var(--font-num)
     const catName = r.cat === "custom" ? `手入力 ${n("customRate")}%` : catMap[r.cat].name;
     return memoLines() + [
       `カテゴリー: ${catName}（${state.store === "basic" ? "ストアあり" : "ストアなし"}${state.trs === "yes" ? "・TRS Plus" : ""}）`,
-      `関税: ${r.ddp ? `DDP ${n("tariffRate")}%` : "なし"}`,
+      `関税: ${r.ddp ? `DDP ${TARIFF_RATE}%（${r.carrierName}）` : "なし"}`,
       `販売価格: ${usd(r.price)} / 送料: ${usd(r.ship)} / Sales tax: ${usd(r.stax)}`,
       `Final value fee: ${usd(r.fvfNet)}`,
       `International fee: ${usd(r.intl)}`,
@@ -604,19 +638,67 @@ textarea.fallback { width: 100%; min-height: 160px; font-family: var(--font-num)
   });
   $("resetAll").addEventListener("click", () => {
     try { localStorage.removeItem(STORE_KEY); } catch {}
-    for (const id of [...NUM, ...TXT]) $(id).value = "";
+    for (const id of [...NUM, ...TXT]) if (id !== "fx") $(id).value = "";
     $("noDuty").checked = false;
-    applyValues(FACTORY);
+    applyValues(FACTORY, { skipFx: true });
     $("sampleNote").hidden = true;
     render(); toast("初期値に戻しました");
   });
 
+  // ---- ドル円レート（開くたびに最新を取得）----
+  const FX_KEY = "cameraEbayProfitLastFx";
+  const FX_SOURCES = [
+    ["open.er-api.com", "https://open.er-api.com/v6/latest/USD", j => ({ rate: j.rates.JPY, at: new Date(j.time_last_update_unix * 1000) })],
+    ["Frankfurter（ECB）", "https://api.frankfurter.dev/v1/latest?base=USD&symbols=JPY", j => ({ rate: j.rates.JPY, at: new Date(j.date) })],
+    ["currency-api", "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json", j => ({ rate: j.usd.jpy, at: new Date(j.date) })],
+  ];
+  const fmtAt = d => isNaN(d) ? "" : `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  let fxManual = false;
+  $("fx").addEventListener("input", () => { fxManual = true; $("fxHint").textContent = "手入力のレートで計算中。「最新に更新」で自動取得に戻ります"; });
+
+  function setFx(rate, label) {
+    $("fx").value = (Math.round(rate * 100) / 100).toFixed(2);
+    $("fxHint").textContent = label;
+    render();
+  }
+  async function loadFx(force) {
+    const btn = $("fxRefresh");
+    btn.disabled = true;
+    if (force) fxManual = false;
+    for (const [name, url, pick] of FX_SOURCES) {
+      try {
+        const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 6000);
+        const res = await fetch(url, { cache: "no-store", signal: ctl.signal });
+        clearTimeout(t);
+        if (!res.ok) continue;
+        const { rate, at } = pick(await res.json());
+        if (!(rate > 50 && rate < 500)) continue;
+        try { localStorage.setItem(FX_KEY, JSON.stringify({ rate, at: at.getTime(), name })); } catch {}
+        if (!fxManual) setFx(rate, `最新レート：${fmtAt(at)} 時点（${name}）`);
+        btn.disabled = false;
+        return;
+      } catch {}
+    }
+    btn.disabled = false;
+    if (fxManual) return;
+    let cached = null;
+    try { cached = JSON.parse(localStorage.getItem(FX_KEY) || "null"); } catch {}
+    if (cached) setFx(cached.rate, `最新レートを取得できませんでした。前回取得したレート（${fmtAt(new Date(cached.at))} 時点）を使っています`);
+    else $("fxHint").textContent = "最新レートを取得できませんでした。今のレートを手入力してください";
+  }
+  $("fxRefresh").addEventListener("click", () => loadFx(true));
+
   // ---- 起動 ----
   applyValues(FACTORY);
   const saved = loadSaved();
-  if (saved) applyValues(saved);
+  if (saved) applyValues(saved, { skipFx: true });
   applyValues(SAMPLE);
+  try {
+    const c = JSON.parse(localStorage.getItem(FX_KEY) || "null");
+    if (c) $("fx").value = (Math.round(c.rate * 100) / 100).toFixed(2);
+  } catch {}
   render();
+  loadFx(false);
 })();
 </script>
 </body>
